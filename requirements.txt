@@ -1,0 +1,11 @@
+streamlit>=1.28.0
+pandas>=1.5.0
+openai>=1.0.0
+chromadb>=0.4.0
+SpeechRecognition>=3.10.0
+pydub>=0.25.1
+PyAudio>=0.2.11
+sqlparse>=0.4.4
+python-dotenv>=1.0.0
+google-generativeai>=0.3.0
+numpy>=1.21.0 
