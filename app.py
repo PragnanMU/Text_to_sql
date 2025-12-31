@@ -16,7 +16,26 @@ if uploaded_file is not None:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".sql") as tmp:
         tmp.write(uploaded_file.read())
         temp_sql_path = tmp.name
+    
+    # Use a consistent collection name based on the uploaded file
+    collection_name = os.path.splitext(uploaded_file.name)[0]
+    
     st.success(f"Uploaded: {uploaded_file.name}")
+    
+    # Store schema once when file is uploaded
+    try:
+        # Create a custom SchemaRetriever with consistent collection name
+        retriever = SchemaRetriever(temp_sql_path)
+        # Override the collection name to be consistent
+        retriever.collection_name = collection_name
+        retriever.collection = retriever.client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=retriever.embed_model
+        )
+        retriever.store_schema()
+        st.success("Schema stored successfully!")
+    except Exception as e:
+        st.warning(f"Schema storage warning: {str(e)}")
 
     # -----------------------------
     # Combined Audio + Text Input
@@ -66,25 +85,26 @@ if uploaded_file is not None:
     if st.button("Ask") and st.session_state["question"].strip():
         question = st.session_state["question"].strip()
         temp_db_path = temp_sql_path.replace(".sql", ".db")
+        db_executor = None  # Initialize to None
         try:
             # Step 1: Initialize DB
             initialize_sqlite_db(temp_sql_path, temp_db_path)
 
-            # Step 2: Store schema
-            retriever = SchemaRetriever(temp_sql_path)
-            retriever.store_schema()
+            # Step 2: Load LLM (schema already stored)
+            llm = LLM_model(collection_name=collection_name)
 
-            # Step 3: Load LLM
-            llm = LLM_model(collection_name=os.path.splitext(os.path.basename(temp_sql_path))[0])
-
-            # Step 4: SQL Validator
+            # Step 3: SQL Validator
             validator = SQLValidatorAgent()
 
-            # Step 5: DB Executor
+            # Step 4: DB Executor
             db_executor = DatabaseExecutorAgent(temp_db_path)
 
             st.info(f"Question: {question}")
-            result_obj = llm.generate_sql(question)
+            
+            # Generate SQL with progress indicator
+            with st.spinner("Generating SQL query..."):
+                result_obj = llm.generate_sql(question)
+            
             summary = result_obj.get("summary", "")
             sql = result_obj.get("sql_query", "")
 
@@ -92,8 +112,12 @@ if uploaded_file is not None:
                 st.markdown(f"**Summary:** {summary}")
             st.code(sql, language="sql")
 
-            validated_sql = validator.validate_sql(question, llm.get_schema(), sql)
-            st.success("SQL validated!")
+            try:
+                validated_sql = validator.validate_sql(question, llm.get_schema(), sql)
+                st.success("SQL validated!")
+            except Exception as e:
+                st.warning(f"Validation failed: {str(e)}. Using original SQL.")
+                validated_sql = sql
 
             result = db_executor.execute_query(validated_sql)
             if isinstance(result, list) and result:
@@ -105,9 +129,23 @@ if uploaded_file is not None:
                 st.error(result)
 
         except Exception as e:
-            st.error(f"Error: {str(e)}")
+            error_str = str(e)
+            # Check if it's a quota/rate limit error
+            if "quota" in error_str.lower() or "429" in error_str or "rate limit" in error_str.lower():
+                st.error("🚫 **API Quota Exceeded**")
+                st.warning(
+                    "You've exceeded your Gemini API quota. Please:\n\n"
+                    "1. Check your API usage: https://ai.dev/usage?tab=rate-limit\n"
+                    "2. Review your plan and billing: https://ai.google.dev/gemini-api/docs/rate-limits\n"
+                    "3. Wait a few minutes before retrying\n"
+                    "4. Consider upgrading your API plan if needed"
+                )
+                st.error(f"**Technical Details:**\n```\n{error_str}\n```")
+            else:
+                st.error(f"Error: {error_str}")
         finally:
-            db_executor.close()
+            if db_executor is not None:
+                db_executor.close()
             os.remove(temp_sql_path)
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
