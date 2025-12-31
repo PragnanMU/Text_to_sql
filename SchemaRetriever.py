@@ -1,16 +1,15 @@
 import os
 import sqlparse
 import re
-import google.generativeai as genai
 from chromadb import PersistentClient
 from chromadb.config import Settings
-from chromadb.utils.embedding_functions import GoogleGenerativeAiEmbeddingFunction
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class SchemaRetriever:
-    def __init__(self, sql_file_path: str):
+    def __init__(self, sql_file_path: str, model_name: str = "all-MiniLM-L6-v2"):
         self.sql_file_path = sql_file_path
 
         # Extract collection name from the file name
@@ -21,14 +20,9 @@ class SchemaRetriever:
         self.persist_directory = os.path.abspath("schema")
         os.makedirs(self.persist_directory, exist_ok=True)
 
-        # Load Gemini API key
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is not set")
-        genai.configure(api_key=api_key)
-        self.embed_model = GoogleGenerativeAiEmbeddingFunction(
-            api_key=api_key,
-            model_name="models/embedding-001"
+        # Initialize Sentence Transformer embedding function
+        self.embed_model = SentenceTransformerEmbeddingFunction(
+            model_name=model_name
         )
 
         # Initialize PersistentClient
@@ -169,12 +163,12 @@ class SchemaRetriever:
 
     def store_schema(self):
         """Store schema statements in ChromaDB"""
+        # Check if collection already has data
+        if self.collection.count() > 0:
+            print(f"\n⚠️ Collection '{self.collection_name}' already exists with {self.collection.count()} items. Skipping storage.")
+            return
+            
         schema_statements = self.extract_schema_statements()
-
-        # Clear existing data in the collection
-        existing_count = self.collection.count()
-        if existing_count > 0:
-            self.collection.delete(ids=[f"schema_doc_{i}" for i in range(existing_count)])
 
         # Batch insert
         self.collection.add(
