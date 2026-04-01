@@ -130,15 +130,13 @@ if uploaded_file is not None:
 
         except Exception as e:
             error_str = str(e)
-            # Check if it's a quota/rate limit error
-            if "quota" in error_str.lower() or "429" in error_str or "rate limit" in error_str.lower():
-                st.error("🚫 **API Quota Exceeded**")
+            if "ollama" in error_str.lower() or "connection refused" in error_str.lower():
+                st.error("🚫 **Ollama is not available**")
                 st.warning(
-                    "You've exceeded your Gemini API quota. Please:\n\n"
-                    "1. Check your API usage: https://ai.dev/usage?tab=rate-limit\n"
-                    "2. Review your plan and billing: https://ai.google.dev/gemini-api/docs/rate-limits\n"
-                    "3. Wait a few minutes before retrying\n"
-                    "4. Consider upgrading your API plan if needed"
+                    "Please make sure Ollama is running and the model is pulled:\n\n"
+                    "1. Start Ollama\n"
+                    "2. Run: `ollama pull qwen2.5:7b`\n"
+                    "3. Retry your question"
                 )
                 st.error(f"**Technical Details:**\n```\n{error_str}\n```")
             else:

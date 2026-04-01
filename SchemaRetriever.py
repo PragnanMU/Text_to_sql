@@ -3,13 +3,13 @@ import sqlparse
 import re
 from chromadb import PersistentClient
 from chromadb.config import Settings
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class SchemaRetriever:
-    def __init__(self, sql_file_path: str, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, sql_file_path: str):
         self.sql_file_path = sql_file_path
 
         # Extract collection name from the file name
@@ -20,10 +20,8 @@ class SchemaRetriever:
         self.persist_directory = os.path.abspath("schema")
         os.makedirs(self.persist_directory, exist_ok=True)
 
-        # Initialize Sentence Transformer embedding function
-        self.embed_model = SentenceTransformerEmbeddingFunction(
-            model_name=model_name
-        )
+        # Default embedding avoids the heavy sentence-transformers/torch stack.
+        self.embed_model = DefaultEmbeddingFunction()
 
         # Initialize PersistentClient
         self.client = PersistentClient(

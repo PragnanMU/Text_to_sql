@@ -178,3 +178,19 @@ If you encounter any issues or have questions:
 
 **Happy Querying! 🎉**
 
+## Spider Batch Testing (No UI)
+
+Use `spider_eval.py` to test model outputs directly on Spider questions and export predictions to CSV.
+
+```bash
+python spider_eval.py --spider-root spider --dataset dev.json --output spider_dev_predictions.csv --model qwen2.5:7b
+```
+
+Useful options:
+
+- `--limit 100` -> run only first 100 examples
+- `--start-index 200` -> resume from a specific dataset index
+- `--dataset train_spider.json` -> switch split
+
+CSV columns include: `index`, `db_id`, `question`, `gold_sql`, `predicted_sql`, `summary`, `status`, `error`, `elapsed_sec`.
+
