@@ -50,18 +50,20 @@ print(f"    MATCH:    {exec_match_100} ({100*exec_match_100/gen_ok_100:.1f}%)")
 print(f"    MISMATCH: {exec_mismatch_100} ({100*exec_mismatch_100/gen_ok_100:.1f}%)")
 
 print(f"\n{'='*70}")
-print("NEXT STEPS:")
+print("KEY FINDINGS:")
 print(f"{'='*70}")
 print("""
-1. Few-shot prompting improved accuracy by +25%!
-   - Baseline: 49.1% (no examples)
-   - With examples: 74.0% (with 3 in-context examples)
+✓ Few-shot prompting with 3 in-context examples improved accuracy by +25%
+  - Baseline (no examples):    49.1% 
+  - With few-shot examples:    74.0%
+  
+This approach requires NO training or fine-tuning!
+Simply add real SQL examples to the LLM prompt.
+""")
 
-2. To improve further, implement fine-tuning:
-   - Fine-tuning dataset prepared: finetuning_data.jsonl (1000 samples)
-   - See prepare_finetuning.py for instructions
-   - Expected improvement: +20-30% more (targeting 85%+ accuracy)
-
-3. Run full 1500 with improved prompting:
-   python spider_eval_generate_with_exec.py --limit 1500 --preview 5
+print(f"\n{'='*70}")
+print("TO RUN FULL EVALUATION WITH FEW-SHOT:")
+print(f"{'='*70}")
+print("""
+python spider_eval_generate_with_exec.py --spider-root spider --dataset train_spider.json --output spider_exec_results_1500_fewshot.csv --model qwen2.5:7b --limit 1500 --preview 5
 """)

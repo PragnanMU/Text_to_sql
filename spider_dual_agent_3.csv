@@ -1,0 +1,4 @@
+index,db_id,question,gen_status,val_status,exec_match,elapsed
+1,department_management,How many heads of the departments are older than 56 ?,empty_response,skipped,False,159.1888062953949
+2,department_management,"List the name, born state and age of the heads of department",empty_response,skipped,False,3.401325225830078
+3,department_management,"List the creation year, name and budget of each department.",empty_response,skipped,False,2.6262383460998535

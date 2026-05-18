@@ -1,4 +1,5 @@
 from langchain_ollama import ChatOllama
+import re
 
 
 class SQLValidatorAgent:
@@ -9,9 +10,60 @@ class SQLValidatorAgent:
             num_predict=300,
         )
 
+    def _extract_schema_elements(self, schema: str):
+        """Extract table names and column names from CREATE TABLE statements."""
+        tables = {}
+        # Match CREATE TABLE statements
+        for match in re.finditer(r'CREATE TABLE\s+(\w+)\s*\((.*?)\);', schema, re.DOTALL | re.IGNORECASE):
+            table_name = match.group(1).lower()
+            columns_str = match.group(2)
+            # Extract column names (first word before type)
+            columns = []
+            for col_match in re.finditer(r'(\w+)\s+(?:int|text|varchar|datetime|decimal|float|blob|real)', columns_str, re.IGNORECASE):
+                columns.append(col_match.group(1).lower())
+            tables[table_name] = columns
+        return tables
+
+    def _validate_schema_usage(self, sql_query: str, schema_elements: dict) -> (bool, str):
+        """Check if SQL query uses only tables/columns from schema."""
+        sql_lower = sql_query.lower()
+        
+        # Extract table references (after FROM, JOIN)
+        table_refs = set()
+        for match in re.finditer(r'(?:FROM|JOIN)\s+(\w+)', sql_lower):
+            table_refs.add(match.group(1))
+        
+        # Extract column references (simplified)
+        col_refs = set()
+        for match in re.finditer(r'(\w+)\.(\w+)', sql_lower):
+            col_refs.add((match.group(1), match.group(2)))
+        
+        valid_tables = set(schema_elements.keys())
+        
+        # Check if all referenced tables exist
+        for table_ref in table_refs:
+            if table_ref not in valid_tables:
+                return False, f"Table '{table_ref}' not found in schema"
+        
+        # Check if all qualified column references exist
+        for table_ref, col_ref in col_refs:
+            if table_ref not in valid_tables:
+                return False, f"Table '{table_ref}' not found in schema"
+            if col_ref not in schema_elements[table_ref]:
+                return False, f"Column '{col_ref}' not found in table '{table_ref}'"
+        
+        return True, "All tables and columns are in schema"
+
     def _check_sql(self, question: str, schema: str, sql_query: str) -> str:
-        prompt = f"""
-Please review this SQL query for correctness.
+        # First validate schema usage
+        schema_elements = self._extract_schema_elements(schema)
+        is_valid, schema_msg = self._validate_schema_usage(sql_query, schema_elements)
+        if not is_valid:
+            return f"INVALID: {schema_msg}"
+        
+        prompt = f"""You are a strict SQL validator. Review this SQL query for correctness.
+
+CRITICAL: Only use tables and columns that exist in the schema below.
 
 Database Schema:
 {schema}
@@ -23,9 +75,9 @@ Generated SQL Query:
 {sql_query}
 
 Please respond with exactly one of these options:
-- VALID (if the query is correct)
-- FIXED: [corrected SQL query] (if you can fix it)
-- INVALID (if it cannot be fixed)
+- VALID (if the query is correct and uses only schema tables/columns)
+- FIXED: [corrected SQL query] (if you can fix it while using ONLY schema elements)
+- INVALID (if it references non-existent tables/columns or cannot be fixed)
 
 Do not include any other text or explanations.
 """
@@ -52,11 +104,15 @@ Do not include any other text or explanations.
                 result = self._check_sql(question, schema, sql_query)
 
                 if result == "VALID":
-                    print(f"Attempt {attempt + 1}: SQL is valid.")
+                    print(f"Attempt {attempt + 1}: SQL is valid (schema-compliant).")
                     return sql_query
                 if result.startswith("FIXED:"):
                     sql_query = result.replace("FIXED:", "").strip()
-                    print(f"Attempt {attempt + 1}: SQL was fixed.")
+                    print(f"Attempt {attempt + 1}: SQL was fixed (schema-compliant).")
+                elif result.startswith("INVALID:"):
+                    # Schema violation detected
+                    print(f"Attempt {attempt + 1}: {result}")
+                    return sql_query  # Return original or mark as invalid
                 else:
                     print(f"Attempt {attempt + 1}: SQL is invalid. Retrying...")
             except Exception as e:

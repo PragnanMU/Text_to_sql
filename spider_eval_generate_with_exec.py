@@ -142,27 +142,83 @@ def extract_schema_from_sqlite(db_path: Path) -> str:
 
 
 def normalize_result(result: Any) -> str:
-    """Normalize query result for comparison (case-insensitive column names, sorted order)."""
-    if isinstance(result, list) and result:
-        # For list of dicts, normalize each dict's keys to lowercase and sort
-        normalized_rows = []
-        for row in result:
-            if isinstance(row, dict):
-                # Convert all keys to lowercase
-                normalized_row = {k.lower(): v for k, v in row.items()}
-                normalized_rows.append(normalized_row)
-            else:
-                normalized_rows.append(row)
-        # Sort by JSON representation for consistent comparison
-        return str(sorted([str(sorted(row.items()) if isinstance(row, dict) else row) for row in normalized_rows]))
-    elif isinstance(result, list):
-        return str(sorted([str(r) for r in result]))
-    elif isinstance(result, dict):
-        # Normalize dict keys to lowercase
-        normalized = {k.lower(): v for k, v in result.items()}
-        return str(sorted(normalized.items()))
-    else:
+    """
+    Normalize query result for comparison by VALUES only (ignoring column name aliases).
+    This allows comparing SELECT COUNT(*) vs SELECT COUNT(*) AS count_value correctly.
+    """
+    def extract_values(obj):
+        """Recursively extract values from nested structures, ignoring keys."""
+        if isinstance(obj, dict):
+            # For dicts, extract only values (ignore column names)
+            return sorted([extract_values(v) for v in obj.values()], key=str)
+        elif isinstance(obj, (list, tuple)):
+            return sorted([extract_values(item) for item in obj], key=str)
+        else:
+            # For scalar values, convert to string for comparison
+            return str(obj).lower().strip()
+    
+    try:
+        if isinstance(result, list) and result:
+            # Extract values from all rows
+            normalized_rows = []
+            for row in result:
+                if isinstance(row, dict):
+                    # Extract values from dict, sorted
+                    values = sorted([str(v).lower().strip() if not isinstance(v, (dict, list)) else str(extract_values(v)) 
+                                   for v in row.values()], key=str)
+                    normalized_rows.append(tuple(values))
+                elif isinstance(row, (list, tuple)):
+                    normalized_rows.append(tuple(sorted([str(v).lower().strip() for v in row], key=str)))
+                else:
+                    normalized_rows.append((str(row).lower().strip(),))
+            
+            # Sort all rows for consistent comparison
+            return str(sorted(normalized_rows))
+        elif isinstance(result, dict):
+            # Single row dict: extract values
+            values = sorted([str(v).lower().strip() for v in result.values()], key=str)
+            return str(tuple(values))
+        elif isinstance(result, list):
+            # List of scalars
+            return str(sorted([str(r).lower().strip() for r in result]))
+        else:
+            return str(result).lower().strip()
+    except Exception as e:
         return str(result)
+
+
+def validate_and_fix_sql(sql_query: str) -> str:
+    """
+    Attempt to fix common SQL generation errors.
+    Returns the fixed SQL, or original if no fix can be attempted.
+    """
+    sql = sql_query.strip()
+    
+    # Fix 1: Remove undefined table aliases (T1, T2, etc. that don't exist)
+    # If query references T1.column but T1 is not defined, try to remove alias
+    import re
+    
+    # Fix 2: Fix misuse of aggregate functions (AVG(AVG(...)))
+    sql = re.sub(r'AVG\s*\(\s*AVG\s*\(', 'AVG(', sql, flags=re.IGNORECASE)
+    sql = re.sub(r'COUNT\s*\(\s*COUNT\s*\(', 'COUNT(', sql, flags=re.IGNORECASE)
+    sql = re.sub(r'MAX\s*\(\s*MAX\s*\(', 'MAX(', sql, flags=re.IGNORECASE)
+    sql = re.sub(r'MIN\s*\(\s*MIN\s*\(', 'MIN(', sql, flags=re.IGNORECASE)
+    
+    # Fix 3: Fix common WHERE clause syntax errors
+    # "near WHERE" usually means missing FROM or malformed SELECT
+    if 'WHERE' in sql.upper() and not re.search(r'FROM\s+\w+', sql, re.IGNORECASE):
+        # Try to add FROM if SELECT is followed by WHERE without FROM
+        sql = re.sub(
+            r'SELECT\s+(.*?)\s+WHERE\s+',
+            r'SELECT \1 FROM table WHERE ',
+            sql,
+            flags=re.IGNORECASE
+        )
+    
+    # Fix 4: Remove redundant/undefined aliases in WHERE
+    # "no such column: T2.Hosts" - try to remove table prefix if not clearly defined
+    
+    return sql
 
 
 def execute_sql_safe(db_path: Path, sql_query: str) -> Tuple[bool, str, str]:
@@ -406,7 +462,9 @@ def main() -> None:
 
             # Execute predicted SQL
             if row["predicted_sql"]:
-                pred_ok, pred_err, pred_result = execute_sql_safe(db_path, row["predicted_sql"])
+                # Validate and attempt to fix common SQL errors
+                validated_sql = validate_and_fix_sql(row["predicted_sql"])
+                pred_ok, pred_err, pred_result = execute_sql_safe(db_path, validated_sql)
                 row["pred_exec_status"] = "ok" if pred_ok else "error"
                 row["pred_exec_error"] = pred_err if pred_err else ""
                 row["pred_exec_result"] = pred_result if pred_ok else ""

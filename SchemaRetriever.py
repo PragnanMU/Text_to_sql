@@ -137,8 +137,21 @@ class SchemaRetriever:
     def extract_schema_statements(self):
         """Extract CREATE TABLE statements from SQL file"""
         try:
-            with open(self.sql_file_path, "r") as f:
-                sql_content = f.read()
+            # Try multiple encodings to handle files with encoding issues
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']
+            sql_content = None
+            for enc in encodings:
+                try:
+                    with open(self.sql_file_path, "r", encoding=enc) as f:
+                        sql_content = f.read()
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            
+            if sql_content is None:
+                # Final fallback: read with errors='replace'
+                with open(self.sql_file_path, "r", encoding='utf-8', errors='replace') as f:
+                    sql_content = f.read()
         except FileNotFoundError:
             raise FileNotFoundError(f"SQL file not found at: {self.sql_file_path}")
 

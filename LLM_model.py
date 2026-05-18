@@ -4,6 +4,7 @@ from chromadb import PersistentClient
 from chromadb.config import Settings
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from langchain_ollama import ChatOllama
+from few_shot_examples import format_fewshot_examples
 
 
 class LLM_model:
@@ -82,27 +83,43 @@ class LLM_model:
             raise ValueError("No schema available to generate SQL")
 
         schema_text = "\n\n".join(schema_statements)
+        
+        # Include few-shot examples
+        fewshot_text = format_fewshot_examples(include_count=8)
 
-        prompt = f"""You are a SQL expert. Generate a SQL query for this question using ONLY the schema below.
+        prompt = f"""You are a SQL expert. Your task is to generate ONLY correct SQL queries from natural language questions.
 
-SCHEMA:
+CONSTRAINT: You MUST use ONLY tables and columns that exist in the provided schema. 
+Do NOT use any external knowledge, assumptions, or hallucinated columns/tables.
+If a column or table is not in the schema, DO NOT use it.
+
+{fewshot_text}
+
+Database Schema (ONLY source of truth for tables and columns):
 {schema_text}
 
-QUESTION: {nlp_question}
+Natural Language Question:
+{nlp_question}
 
-Generate result in JSON format
-result={{
+Generate result in JSON format:
+{{
     "sql_query": "sql query",
     "summary": "summary of the query"
 }}
-RULES:
-1. Return ONLY the JSON result
-2. Do NOT include explanations
-3. Use correct table/column names from schema
-4. Query must be syntactically valid
-5. If question is ambiguous, make reasonable assumptions
 
-JSON RESULT:"""
+STRICT RULES:
+1. Return ONLY valid JSON (no explanations or markdown)
+2. ONLY use table and column names that appear in the schema above
+3. If a table or column is not in schema → DO NOT USE IT
+4. Always qualify column names in JOINs: table_name.column_name
+5. Use COUNT(*), AVG(), MAX(), MIN() correctly (no nesting)
+6. Ensure WHERE clauses have correct SQL syntax
+7. Use GROUP BY before HAVING
+8. Do NOT reference undefined aliases or columns
+9. Query must be valid SQLite SQL
+10. If question asks for column not in schema → return error summary
+
+JSON OUTPUT:"""
 
         try:
             response = self.model.invoke(prompt)
